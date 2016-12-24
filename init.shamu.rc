@@ -16,7 +16,6 @@
 
 import init.shamu.usb.rc
 import init.shamu.power.rc
-import init.shamu.diag.rc
 
 on early-init
     mkdir /firmware 0771 system system
@@ -25,8 +24,6 @@ on early-init
     chown system system /sys/kernel/debug/kgsl/proc
 
 on init
-    mkdir /oem 0550 root root
-
     # Set permissions for persist partition
     mkdir /persist 0771 system system
 
@@ -40,8 +37,6 @@ on fs
     # results in failure to launch late-start class.
     wait /dev/block/platform/msm_sdcc.1/by-name/oem
     mount ext4 /dev/block/platform/msm_sdcc.1/by-name/oem /oem ro nosuid nodev context=u:object_r:oemfs:s0
-
-    mkdir /fsg 0755 root root
     mount ext4 /dev/block/platform/msm_sdcc.1/by-name/mdm1m9kefs3 /fsg ro nosuid nodev barrier=0 context=u:object_r:fsg_file:s0
 
     restorecon_recursive /persist
@@ -49,15 +44,6 @@ on fs
     mkdir /persist/data/sfs 0700 system system
     mkdir /persist/data/tz 0700 system system
     mkdir /persist/public 0755 system radio
-    mkdir /persist/public/hiddenmenu 0775 system radio
-    mkdir /persist/public/hiddenmenu/data 0775 system radio
-
-    # Enable rmnet data and aggregation
-    setprop persist.rmnet.mux enabled
-    setprop persist.rmnet.data.enable true
-    setprop persist.data.wda.enable true
-    setprop persist.data.df.agg.dl_pkt 10
-    setprop persist.data.df.agg.dl_size 4096
 
 on post-fs-data
     mkdir /tombstones/modem 0771 system system
@@ -79,10 +65,6 @@ on post-fs-data
 
     mkdir /persist/mdm 0770 radio radio
 
-    #Subsystem RAM-dumps
-    mkdir /data/ss-ram-dumps 0750 radio log
-    mkdir /data/ss-ram-dumps/bp-dumps 0750 radio log
-
     # rild files
     mkdir /data/misc/audio_cutback 0770 radio audio
 
@@ -90,24 +72,7 @@ on early-boot
     # set RLIMIT_MEMLOCK to 64MB
     setrlimit 8 67108864 67108864
 
-    # Allow subsystem (modem etc) debugging
-    # write /sys/module/subsystem_restart/parameters/enable_debug ${persist.sys.ssr.enable_debug}
-
     write /sys/kernel/boot_adsp/boot 1
-
-    # Subsytem Restart
-    #venus
-    write /sys/bus/msm_subsys/devices/subsys0/restart_level "related"
-    write /sys/bus/msm_subsys/devices/subsys0/recovery_policy "skip_restart"
-    #adsp
-    write /sys/bus/msm_subsys/devices/subsys1/restart_level "related"
-    write /sys/bus/msm_subsys/devices/subsys1/recovery_policy "skip_restart"
-    #vpu
-    write /sys/bus/msm_subsys/devices/subsys2/restart_level "related"
-    write /sys/bus/msm_subsys/devices/subsys2/recovery_policy "skip_restart"
-    #esoc0 (mdm)
-    write /sys/bus/msm_subsys/devices/subsys3/restart_level "related"
-    write /sys/bus/msm_subsys/devices/subsys3/recovery_policy "skip_restart"
 
 on boot
     chown bluetooth net_bt_stack /sys/module/bluetooth_power/parameters/power
@@ -130,14 +95,6 @@ on boot
     chmod 0660 /dev/ttyHS0
     chown bluetooth net_bt_stack /sys/devices/platform/msm_serial_hs.0/clock
     chmod 0660 /sys/devices/platform/msm_serial_hs.0/clock
-
-    # update foreground cpuset now that processors are up
-    # reserve CPU 3 for the top app
-    write /dev/cpuset/foreground/cpus 0-2
-    write /dev/cpuset/foreground/boost/cpus 0-3
-    write /dev/cpuset/background/cpus 0
-    write /dev/cpuset/system-background/cpus 0-1
-    write /dev/cpuset/top-app/cpus 0-3
 
     chmod 0660 /dev/ttyHS2
     chown bluetooth net_bt_stack /dev/ttyHS2
@@ -306,13 +263,13 @@ on post-fs-data
 
 on property:bluetooth.isEnabled=true
     start btwlancoex
-    write /sys/class/bluetooth/hci0/idle_timeout 7000
+    write /sys/class/bluetooth/hci0/idle_timeout 0
 
 on property:ro.bluetooth.ftm_enabled=true
     start ftmd
 
 on property:persist.env.fastdorm.enabled=true
-    setprop persist.radio.data_no_toggle 1
+    setprop persist.radio.data_no_toggle 0
 
 service irsc_util /system/bin/irsc_util "/etc/sec_config"
     class main
@@ -367,7 +324,6 @@ service ims_rtp_daemon /system/bin/ims_rtp_daemon
     user root
     socket ims_rtpd stream 0660 system radio
     group system radio inet log
-    disabled
 
 on property:sys.ims.DATA_DAEMON_STATUS=1
    start ims_rtp_daemon
@@ -375,8 +331,7 @@ on property:sys.ims.DATA_DAEMON_STATUS=1
 service sensors /system/bin/sensors.qcom
     class core
     user root
-    group root wakelock
-    writepid /dev/cpuset/system-background/tasks
+    group root
 
 on property:ro.use_data_netmgrd=false
     # netmgr not supported on specific target
@@ -456,8 +411,7 @@ service qseecomd /system/bin/qseecomd
 service mpdecision /system/bin/mpdecision --avg_comp
    class main
    user root
-   group root readproc
-   writepid /dev/cpuset/system-background/tasks
+   group root
 
 service ss_ramdump /system/bin/subsystem_ramdump
     class main
@@ -492,12 +446,6 @@ service bdAddrLoader /system/bin/bdAddrLoader -p ro.boot.btmacaddr -s -x
 on property:vold.decrypt=trigger_reset_main
     stop gnss-svcd
 
-# When QCA1530 is known not to present
-on property:persist.qca1530=no
-   stop gnss-svcd
-   stop gnss-detect
-   write /sys/kernel/qca1530/chip_state 0
-
 on property:init.svc.surfaceflinger=stopped
     stop ppd
 
@@ -509,7 +457,7 @@ service mmi-touch-sh /system/bin/init.mmi.touch.sh atmel
 service mdm_helper_proxy /system/bin/mdm_helper_proxy
     class core
     user system
-    group system wakelock
+    group system
     disabled
 
 # Stop mdm_helper_proxy in case of shutdown
